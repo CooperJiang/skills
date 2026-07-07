@@ -1,0 +1,23 @@
+{
+  "name": "@xiaojiu/claude-skills",
+  "version": "0.1.0",
+  "description": "个人 Claude Code skills 集合,一键安装进 ~/.claude/skills",
+  "bin": {
+    "claude-skills": "bin/claude-skills.js"
+  },
+  "files": [
+    "bin/",
+    "skills/",
+    "scripts/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=14"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "skills"
+  ],
+  "license": "MIT"
+}
