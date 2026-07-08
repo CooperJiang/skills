@@ -55,7 +55,7 @@ claude-skills doctor                  环境自检(python3 / node / 目标目录
 <!-- 新增 skill:在上表加一行,并在下面照 recall 的格式补一节 -->
 
 ### recall
-**装:** `claude-skills install recall` ·  **触发:** 在对话里输入 `/recall`
+**装:** `claude-skills install recall` ·  **触发:** 在对话里输入 `/recall` ·  **详细用法:** [skills/recall/USAGE.md](skills/recall/USAGE.md)
 
 走中转的人常遇到:老会话账号过期后 `claude -r` / `codex resume` 恢复不了,只能新开对话。recall 直接读本地 transcript 把上下文捞回来,绕开这个限制。能力:
 
