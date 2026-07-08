@@ -76,6 +76,18 @@ python3 ~/.claude/skills/recall/recall.py prune <id> --delete --force   # 硬删
   2. **默认只软删(归档)**。除非用户**明确说“永久删除/硬删除/彻底删掉”**,否则绝不加 `--delete`。
   3. 真要硬删:先**说明“不可逆、无法 restore”并二次确认**,得到用户再次明确同意后才用 `--delete --force`,逐条报给用户核对。宁可归档。
 
+## 能力五:打包记忆 / 跨目录携带(pack / load)
+**痛点**:recall 按当前目录(cwd)过滤会话,**一换目录就扫不到旧对话**。pack 把某段对话导出成**自包含、可移植**的记忆文件,存到中立目录 `~/.recall-packs/`(不绑任何项目/工具),在**任何新目录/新对话**都能 load 回来。
+```
+python3 ~/.claude/skills/recall/recall.py pack [序号|id]   # 缺省=打包“当前对话”;默认 full 深度
+python3 ~/.claude/skills/recall/recall.py pack --out /path/to/xx.md   # 也可导到指定路径(如直接丢进新项目目录)
+python3 ~/.claude/skills/recall/recall.py packs            # 列出已有记忆包
+python3 ~/.claude/skills/recall/recall.py load <文件名|路径>  # 在任意目录读回,你据此接手
+```
+- 用户说「**打包记忆 / 打包当前对话**」→ 跑 `pack`(不给 id 就是当前会话,靠 `CLAUDE_CODE_SESSION_ID` 识别);把生成的文件名回给用户。
+- 用户在新目录说「**加载我打包的记忆 / load xxx**」→ 跑 `load`,读到内容后**据此还原上下文接着干**(包里有来源 cwd/别名/全局记忆/意图主线/尾轮/已有 digest)。
+- 包是纯文本 md,可直接拷给别人、塞进新项目仓库、或跨机同步。跨工具通用(Claude 打的包,Codex 里也能 load)。
+
 ## 其它
 - 纯本地读写,和中转账号是否过期无关——这正是它能绕开 resume 失效的原因。
 - `list --json` 输出结构化。`show` 的 key 支持 序号/短id/完整id;归档区的会话也能被 resolve 到。

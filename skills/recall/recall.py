@@ -12,9 +12,10 @@ Claude Code 还是 Codex 调用,读对应工具的会话历史。
 
 设计:脚本只做确定性解析/抽取/搬移;总结与写记忆由调用它的 AI 完成。只用标准库。
 """
-import sys, os, json, time, glob, argparse, shutil, re
+import sys, os, json, time, glob, argparse, shutil, re, io, contextlib
 
 HOME = os.path.expanduser("~")
+PACKS_DIR = os.path.join(HOME, ".recall-packs")   # 中立、可移植的记忆包,不绑任何项目/工具
 CLAUDE_DIR = os.path.join(HOME, ".claude")
 CLAUDE_PROJECTS = os.path.join(CLAUDE_DIR, "projects")
 CLAUDE_HISTORY = os.path.join(CLAUDE_DIR, "history.jsonl")
@@ -543,6 +544,101 @@ def show_memory(project):
             print(f.read())
 
 
+def _slugify(s):
+    s = re.sub(r"[^\w一-鿿]+", "-", s or "").strip("-")
+    return s[:40] or "session"
+
+
+def pack_session(provider, project, key, out, depth):
+    """把一段会话打包成自包含、可移植的记忆文件(存 ~/.recall-packs/,或 --out 指定路径)。"""
+    be = get_backend(provider)
+    # 默认打包“当前会话”
+    if not key:
+        cur = current_session_id()
+        if not cur:
+            print("未指定会话,也识别不到当前会话。请给序号/id,或在对话内运行。")
+            return
+        key = cur
+    path = resolve(provider, project, key, show_all=True)
+    if not path:
+        print(f"没找到会话: {key}")
+        return
+
+    cfg = dict(DEPTHS.get(DEPTH_CN.get(depth, depth), DEPTHS["full"]))
+    # 抽取头部元信息(alias/cwd/branch)+ 全量正文
+    rows = {r["sid"]: r for r in list_sessions(provider, project, True, include_archived=True)}
+    sid = be["sid_of"](path)
+    meta = rows.get(sid, {})
+    alias = meta.get("name", "") if meta.get("renamed") else meta.get("name", "")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        be["extract"](path, cfg, provider, True)
+    body = buf.getvalue()
+    # cwd/branch 从 body 里已含;再抓一份放 frontmatter
+    cwd = ""
+    for line in body.splitlines():
+        if line.startswith("工作目录"):
+            cwd = line.split(":", 1)[-1].strip()
+            break
+
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    header = (f"---\nrecall_pack: 1\nsource_provider: {provider}\nsource_sid: {sid}\n"
+              f"source_alias: {alias}\nsource_cwd: {cwd}\npacked_at: {stamp}\n---\n"
+              f"# 📦 记忆打包:{alias or sid[:8]}\n"
+              f"> 从「{cwd or '未知目录'}」的会话打包。在**任意目录** `recall load` 即可加载接手,"
+              f"不受当前目录限制。\n\n")
+
+    if not out:
+        os.makedirs(PACKS_DIR, exist_ok=True)
+        out = os.path.join(PACKS_DIR, f"{_slugify(alias)}-{sid[:8]}.md")
+    with open(out, "w") as f:
+        f.write(header + body)
+    print(f"✓ 已打包 → {out}")
+    print(f"  在新目录/新对话里加载:recall load {os.path.basename(out)}")
+
+
+def list_packs():
+    os.makedirs(PACKS_DIR, exist_ok=True)
+    files = sorted(glob.glob(os.path.join(PACKS_DIR, "*.md")), key=os.path.getmtime, reverse=True)
+    if not files:
+        print(f"(还没有记忆包。用 `recall pack` 打包当前对话;存放目录 {PACKS_DIR})")
+        return
+    print(f"已有记忆包(共 {len(files)},在 {PACKS_DIR}):\n")
+    for p in files:
+        st = os.stat(p)
+        title = ""
+        with open(p, "r", errors="replace") as f:
+            for line in f:
+                if line.startswith("# "):
+                    title = line[2:].strip()
+                    break
+        print(f"  · {os.path.basename(p)}  {human_ago(st.st_mtime)} · {human_size(st.st_size)}")
+        if title:
+            print(f"    {title}")
+    print("\n加载:recall load <文件名>")
+
+
+def load_pack(key):
+    """在任意目录读回一个记忆包(路径 / ~/.recall-packs 下的文件名 / 模糊匹配)。"""
+    cand = None
+    if os.path.exists(key):
+        cand = key
+    else:
+        for p in glob.glob(os.path.join(PACKS_DIR, "*.md")):
+            base = os.path.basename(p)
+            if base == key or base.startswith(key) or key in base:
+                cand = p
+                break
+    if not cand:
+        print(f"没找到记忆包: {key}(用 `recall packs` 看可用的)")
+        return
+    print("=" * 70)
+    print("以下是打包的记忆。请据此还原上下文、接手继续(它可能来自别的目录/项目)。")
+    print("=" * 70 + "\n")
+    with open(cand, "r", errors="replace") as f:
+        print(f.read())
+
+
 def print_list(rows, provider):
     if not rows:
         print("(没找到会话记录)")
@@ -565,7 +661,7 @@ def print_list(rows, provider):
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd")
-    for name in ("list", "show", "prune", "restore", "memory"):
+    for name in ("list", "show", "prune", "restore", "memory", "pack", "packs", "load"):
         sp = sub.add_parser(name)
         sp.add_argument("--provider", default="auto", choices=["auto", "claude", "codex"])
         sp.add_argument("--project", default=os.getcwd())
@@ -585,6 +681,12 @@ def main():
         if name == "prune":
             sp.add_argument("--delete", action="store_true")
             sp.add_argument("--force", action="store_true")
+        if name == "pack":
+            sp.add_argument("key", nargs="?", default=None)   # 缺省=当前会话
+            sp.add_argument("--out", default=None)
+            sp.add_argument("--depth", default="full")
+        if name == "load":
+            sp.add_argument("key")
     args = ap.parse_args()
     if not args.cmd:
         ap.print_help()
@@ -628,6 +730,12 @@ def main():
             print("memory 子命令目前仅 Claude(Codex 记忆在 ~/.codex/memories,机制不同)。")
             return
         show_memory(args.project)
+    elif args.cmd == "pack":
+        pack_session(provider, args.project, args.key, args.out, args.depth)
+    elif args.cmd == "packs":
+        list_packs()
+    elif args.cmd == "load":
+        load_pack(args.key)
 
 
 if __name__ == "__main__":
