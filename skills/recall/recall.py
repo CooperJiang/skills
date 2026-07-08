@@ -448,7 +448,12 @@ def get_backend(provider):
 
 
 def list_sessions(provider, project, show_all, include_archived=False):
-    rows = get_backend(provider)["list"](project, show_all, include_archived)
+    provs = ("claude", "codex") if provider == "both" else (provider,)
+    rows = []
+    for pv in provs:
+        for r in get_backend(pv)["list"](project, show_all, include_archived):
+            r["tool"] = pv
+            rows.append(r)
     rows.sort(key=lambda r: r["mtime"], reverse=True)
     for i, r in enumerate(rows, 1):
         r["idx"] = i
@@ -472,20 +477,39 @@ def resolve(provider, project, key, show_all=False):
     return None
 
 
+def infer_provider(path):
+    return "codex" if os.path.abspath(path).startswith(os.path.abspath(CODEX_DIR)) else "claude"
+
+
+def resolve_meta(provider, project, key, show_all=False):
+    """跨工具解析:返回 (path, 该文件所属 provider)。provider=both 时两边都找。"""
+    provs = ("claude", "codex") if provider == "both" else (provider,)
+    if key.isdigit() and len(key) < 8:
+        for r in list_sessions(provider, project, show_all, include_archived=True):
+            if r["idx"] == int(key):
+                return r["path"], r.get("tool", provs[0])
+        return None, None
+    for pv in provs:
+        p = resolve(pv, project, key, show_all)
+        if p:
+            return p, pv
+    return None, None
+
+
 def prune_sessions(provider, project, keys, do_delete, show_all, force=False):
     if do_delete and not force:
         print("⚠️ 硬删除不可逆。默认策略=软删除(归档,可恢复)。")
         print("   如确实要永久删除,请二次确认后加 --force;否则去掉 --delete 走归档。")
         return
-    be = get_backend(provider)
-    active_root, ar = be["active_root"], archive_root(provider)
     cur = current_session_id()
     done = 0
     for key in keys:
-        path = resolve(provider, project, key, show_all)
+        path, pv = resolve_meta(provider, project, key, show_all)
         if not path:
             print(f"  跳过 {key}:没找到")
             continue
+        be = get_backend(pv)
+        active_root, ar = be["active_root"], archive_root(pv)
         sid = be["sid_of"](path)
         if cur and (sid == cur or sid.startswith(cur) or cur.startswith(sid)):
             print(f"  跳过 {sid[:8]}:这是当前会话,保护不动")
@@ -509,11 +533,12 @@ def prune_sessions(provider, project, keys, do_delete, show_all, force=False):
 
 
 def restore_sessions(provider, project, keys, show_all):
-    be = get_backend(provider)
-    active_root, ar = be["active_root"], archive_root(provider)
     n = 0
     for key in keys:
-        path = resolve(provider, project, key, show_all)
+        path, pv = resolve_meta(provider, project, key, show_all)
+        be = get_backend(pv) if pv else None
+        ar = archive_root(pv) if pv else ""
+        active_root = be["active_root"] if be else ""
         if not path or not os.path.abspath(path).startswith(os.path.abspath(ar)):
             print(f"  跳过 {key}:不在归档区(或没找到)")
             continue
@@ -551,7 +576,6 @@ def _slugify(s):
 
 def pack_session(provider, project, key, out, depth):
     """把一段会话打包成自包含、可移植的记忆文件(存 ~/.recall-packs/,或 --out 指定路径)。"""
-    be = get_backend(provider)
     # 默认打包“当前会话”
     if not key:
         cur = current_session_id()
@@ -559,10 +583,11 @@ def pack_session(provider, project, key, out, depth):
             print("未指定会话,也识别不到当前会话。请给序号/id,或在对话内运行。")
             return
         key = cur
-    path = resolve(provider, project, key, show_all=True)
+    path, provider = resolve_meta(provider, project, key, show_all=True)
     if not path:
         print(f"没找到会话: {key}")
         return
+    be = get_backend(provider)
 
     cfg = dict(DEPTHS.get(DEPTH_CN.get(depth, depth), DEPTHS["full"]))
     # 抽取头部元信息(alias/cwd/branch)+ 全量正文
@@ -643,12 +668,15 @@ def print_list(rows, provider):
     if not rows:
         print("(没找到会话记录)")
         return
-    tool = "Claude" if provider == "claude" else "Codex"
-    print(f"[{tool}] 历史会话(共 {len(rows)} 段,按最近活跃排序):\n")
+    scope = {"claude": "Claude", "codex": "Codex", "both": "Claude+Codex 跨工具"}.get(provider, provider)
+    print(f"[{scope}] 历史会话(共 {len(rows)} 段,按最近活跃排序):\n")
     for r in rows:
         tag = "✎" if r["renamed"] else " "
         arch = " 📦归档" if r.get("archived") else ""
-        print(f"[{r['idx']:>2}] {tag} {r['name']}{arch}")
+        toolbadge = ""
+        if provider == "both":
+            toolbadge = "🟠Codex " if r.get("tool") == "codex" else "🔵Claude "
+        print(f"[{r['idx']:>2}] {tag} {toolbadge}{r['name']}{arch}")
         print(f"      {r['ago']} · {r['branch'] or '?'} · {r['size_h']} · {r['short']}")
         if r["renamed"] and r["first_user"]:
             print(f"      ↳ 首句: {r['first_user']}")
@@ -663,7 +691,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd")
     for name in ("list", "show", "prune", "restore", "memory", "pack", "packs", "load"):
         sp = sub.add_parser(name)
-        sp.add_argument("--provider", default="auto", choices=["auto", "claude", "codex"])
+        sp.add_argument("--provider", default="auto", choices=["auto", "claude", "codex", "both"])
         sp.add_argument("--project", default=os.getcwd())
         if name == "list":
             sp.add_argument("--all", action="store_true")
@@ -708,19 +736,18 @@ def main():
             cfg["turns"] = args.turns
         if args.files is not None:
             cfg["files"] = args.files
-        be = get_backend(provider)
         sumnote = "全部" if cfg["summaries"] == -1 else "最近1段"
         print(f"[{provider}] 读取深度: {depth} · 全局记忆 {sumnote} · 意图主线 "
               f"{'全部' if cfg['users']==-1 else ('无' if cfg['users']==0 else cfg['users'])} · "
               f"结尾 {cfg['turns']} 轮 · 文件 {'全部' if cfg['files']==0 else cfg['files']}\n")
         for i, key in enumerate(args.key):
-            path = resolve(provider, args.project, key, args.all)
+            path, pv = resolve_meta(provider, args.project, key, args.all)
             if not path:
                 print(f"没找到会话: {key}(试试先 list)")
                 continue
             if len(args.key) > 1:
-                print("\n" + "=" * 70 + f"\n# 第 {i+1}/{len(args.key)} 段\n" + "=" * 70)
-            be["extract"](path, cfg, provider, True)
+                print("\n" + "=" * 70 + f"\n# 第 {i+1}/{len(args.key)} 段 [{pv}]\n" + "=" * 70)
+            get_backend(pv)["extract"](path, cfg, pv, True)
     elif args.cmd == "prune":
         prune_sessions(provider, args.project, args.key, args.delete, args.all, args.force)
     elif args.cmd == "restore":

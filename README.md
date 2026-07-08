@@ -65,6 +65,7 @@ claude-skills doctor                  环境自检(python3 / node / 目标目录
 - **持久记忆**:把接手简报沉淀成每段对话的 digest,下次秒读。
 - **打包/携带记忆**:`pack` 把某段对话导出成自包含文件(存 `~/.recall-packs/`),换目录/换机器/给别人后 `load` 即还原——解决「换目录就扫不到旧对话」。
 - **双工具自适应**:自动识别被 Claude 还是 Codex 调用,读对应历史(`~/.claude/projects` / `~/.codex/sessions`)。
+- **跨工具读取**:`--provider both` 一屏合并两边、按工具标记;在 Claude 里能接手 Codex 在本项目的活,反之亦然(同项目按 cwd 归属)。
 
 ## 加一个新 skill
 1. 在 `skills/` 下建目录 `skills/<你的skill>/`,放 `SKILL.md`(带 frontmatter:`name` / `description`;只想装单平台就加 `targets: claude` 或 `codex`)+ 需要的脚本。
