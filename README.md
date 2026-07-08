@@ -10,9 +10,12 @@
 ```bash
 git clone <这个仓库> ~/code/claude-skills   # 位置随意
 cd ~/code/claude-skills
-node bin/claude-skills.js install --all      # 默认软链接进 ~/.claude/skills/
+node bin/claude-skills.js list               # 先看有哪些 skill
+node bin/claude-skills.js install --all      # 全装;或只装某个 ↓
+node bin/claude-skills.js install recall     # 只装 recall(按需挑)
 ```
 之后每台机器 `git pull` 就同步(软链接指向仓库,改动即时生效,无需重装)。
+> **给别人用**:把这个仓库地址发给他即可,照着本 README 跑上面三行就行。`list` 会列出所有 skill 和各自说明,他挑要的 `install <名字>`。
 
 ### 方式二:npm(发布后)
 ```bash
@@ -41,13 +44,28 @@ claude-skills doctor                  环境自检(python3 / node / 目标目录
 
 安装后**新开一个对话**即可用(已开着的会话需重启才发现新 skill)。
 
-## 现有 skill
+## Skill 目录
 
-| skill | 适用 | 说明 |
-|---|---|---|
-| **recall** | claude + codex | 会话/上下文/记忆管家:复刻 `claude -r` / `codex resume`,找回历史会话、按分层深度读取(含自动压缩的“全局记忆”)、跨对话合并、归档/删除老会话、沉淀持久 digest。**自动识别被 Claude 还是 Codex 调用**,读对应工具历史。需 `python3`。 |
+> 一览表(装哪个心里有数),下面每个 skill 有单独一节讲清用途和装法。
+
+| skill | 适用工具 | 依赖 | 一句话 |
+|---|---|---|---|
+| [recall](#recall) | Claude · Codex | python3 | 会话/上下文/记忆管家:找回历史对话、按深度读取、跨对话合并、归档、沉淀记忆 |
+
+<!-- 新增 skill:在上表加一行,并在下面照 recall 的格式补一节 -->
+
+### recall
+**装:** `claude-skills install recall` ·  **触发:** 在对话里输入 `/recall`
+
+走中转的人常遇到:老会话账号过期后 `claude -r` / `codex resume` 恢复不了,只能新开对话。recall 直接读本地 transcript 把上下文捞回来,绕开这个限制。能力:
+
+- **找回并接手**:复刻 `claude -r` 列表让你挑,按 **简读/标准/详读/超详读** 分层读取(含 Claude 自动压缩的“全局记忆”),合成「任务+进度+待办」简报接着干。
+- **跨对话合并**:一次拉多段会话上下文。
+- **归档/删除**:给会话列表瘦身(默认软删可恢复,硬删需二次确认)。
+- **持久记忆**:把接手简报沉淀成每段对话的 digest,下次秒读。
+- **双工具自适应**:自动识别被 Claude 还是 Codex 调用,读对应历史(`~/.claude/projects` / `~/.codex/sessions`)。
 
 ## 加一个新 skill
-1. 在 `skills/` 下建目录 `skills/<你的skill>/`,放 `SKILL.md`(带 frontmatter:`name` / `description`)+ 需要的脚本。
-2. `claude-skills install <你的skill>`(或 `--all`)。
-3. 提交推送,其他机器 `git pull` 后 `claude-skills install <你的skill>`。
+1. 在 `skills/` 下建目录 `skills/<你的skill>/`,放 `SKILL.md`(带 frontmatter:`name` / `description`;只想装单平台就加 `targets: claude` 或 `codex`)+ 需要的脚本。
+2. 在上面 **Skill 目录** 的表格加一行,并照 `recall` 的格式补一节说明。
+3. `claude-skills install <你的skill>`,提交推送;其他机器 `git pull` 后 `claude-skills install <你的skill>`。
