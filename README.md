@@ -1,7 +1,8 @@
 # claude-skills
 
-个人 [Claude Code](https://claude.com/claude-code) skills 集合,一键安装进 `~/.claude/skills/`。
-每个 skill 一个子目录(含 `SKILL.md`),加新 skill = 丢个新文件夹,零配置。
+个人 skills 集合,一键安装进 **[Claude Code](https://claude.com/claude-code)**(`~/.claude/skills/`)**与 Codex**(`~/.codex/skills/`)——两者用同一套 `SKILL.md` 格式,一个 skill 同时喂两个工具。每个 skill 一个子目录(含 `SKILL.md`),加新 skill = 丢个新文件夹,零配置。
+
+> skill 若只适用单平台,在其 `SKILL.md` frontmatter 写 `targets: claude`(或 `codex`)即可限制;缺省两边都装。
 
 ## 安装
 
@@ -42,9 +43,9 @@ claude-skills doctor                  环境自检(python3 / node / 目标目录
 
 ## 现有 skill
 
-| skill | 说明 |
-|---|---|
-| **recall** | Claude 的记忆/上下文管家:在对话里复刻 `claude -r`,找回历史会话、按分层深度读取(含自动压缩的“全局记忆”)、跨对话合并、归档/删除老会话、沉淀持久 digest。需 `python3`。 |
+| skill | 适用 | 说明 |
+|---|---|---|
+| **recall** | claude + codex | 会话/上下文/记忆管家:复刻 `claude -r` / `codex resume`,找回历史会话、按分层深度读取(含自动压缩的“全局记忆”)、跨对话合并、归档/删除老会话、沉淀持久 digest。**自动识别被 Claude 还是 Codex 调用**,读对应工具历史。需 `python3`。 |
 
 ## 加一个新 skill
 1. 在 `skills/` 下建目录 `skills/<你的skill>/`,放 `SKILL.md`(带 frontmatter:`name` / `description`)+ 需要的脚本。
