@@ -8,7 +8,9 @@
 
 recall 有两层皮:
 
-- **对 AI 说话(推荐,日常这样用)**:在 Claude Code / Codex 对话里打 `/recall`,或直接说「找回上次那个对话」「打包当前记忆」「跨工具看看这个项目」。AI 会替你跑下面的命令、把结果整理成简报。
+- **对 AI 说话(推荐,日常这样用)**:直接说「找回上次那个对话」「打包当前记忆」「跨工具看看这个项目」,AI 会替你跑命令、整理成简报。**两个工具的触发入口不同**:
+  - **Claude Code**:斜杠命令 `/recall`(会自动补全)。
+  - **Codex**:**没有** `/recall`(斜杠是 Codex 内置命令)。用美元符 **`$recall`** 显式调用,或直接说人话(如"用 recall 找回上次对话")让 Codex 自动触发。Codex 里技能出现在技能列表/chips 里,不是斜杠。
 - **直接命令行(想手动/写脚本时)**:`python3 ~/.claude/skills/recall/recall.py <子命令> ...`。下文每个场景都给了对应命令。
 
 > 命令里的路径 `~/.claude/skills/recall/recall.py` 是安装后的软链;从仓库直接跑也行:`python3 <仓库>/skills/recall/recall.py`。
