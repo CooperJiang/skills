@@ -205,6 +205,15 @@ def claude_active_dirs(project, show_all):
     return [os.path.join(CLAUDE_PROJECTS, claude_encode(project))]
 
 
+_CMD_TAG_RE = re.compile(r"</?(command|local-command)[^>]*>")
+
+
+def _clean_first(s):
+    # 首条若是斜杠命令,去掉 <command-message>/<command-name> 之类标签,显示干净些
+    s = _CMD_TAG_RE.sub("", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def claude_scan_head(path, max_lines=60):
     first_user = branch = ""
     n = 0
@@ -217,8 +226,35 @@ def claude_scan_head(path, max_lines=60):
         if not first_user and o.get("type") == "user" and not o.get("isCompactSummary"):
             txt = _cl_real(o.get("message", {}))
             if txt:
-                first_user = txt.replace("\n", " ").strip()
+                first_user = _clean_first(txt)
     return first_user, branch
+
+
+def claude_titles(path, nbytes=131072):
+    """从会话 jsonl 里取标题:custom-title(用户改名)/ ai-title(自动)。
+    这两类是小事件、更新时追加,通常靠近文件末尾,故只读尾部若干 KB,取最后一次。"""
+    custom = ai = ""
+    try:
+        size = os.path.getsize(path)
+        with open(path, "rb") as f:
+            if size > nbytes:
+                f.seek(-nbytes, os.SEEK_END)
+                f.readline()  # 丢弃可能被截断的半行
+            data = f.read().decode("utf-8", "replace")
+    except Exception:
+        return "", ""
+    for line in data.splitlines():
+        if '"custom-title"' in line:
+            try:
+                custom = json.loads(line).get("customTitle", "") or custom
+            except Exception:
+                pass
+        elif '"ai-title"' in line:
+            try:
+                ai = json.loads(line).get("aiTitle", "") or ai
+            except Exception:
+                pass
+    return custom, ai
 
 
 def claude_list_rows(project, show_all, include_archived):
@@ -234,10 +270,12 @@ def claude_list_rows(project, show_all, include_archived):
             sid = os.path.basename(path)[:-6]
             st = os.stat(path)
             fu, br = claude_scan_head(path)
-            name = renames.get(sid) or (fu[:48] if fu else "(无标题)")
+            custom, ai = claude_titles(path)
+            rename = custom or renames.get(sid, "")   # 用户改的名(custom-title 或 /rename)
+            name = rename or ai or (fu[:48] if fu else "(无标题)")
             rows.append({"sid": sid, "path": path, "mtime": st.st_mtime, "size": st.st_size,
                          "name": name, "first_user": fu[:80], "branch": br,
-                         "renamed": sid in renames, "archived": arch})
+                         "renamed": bool(rename), "archived": arch})
     return rows
 
 
@@ -249,6 +287,7 @@ def claude_extract(path, cfg, provider, show_digest):
     last_todos = None
     branch = cwd = first_user = ""
     ring, compacts, aways, users_all = [], [], [], []
+    custom_title = ai_title = ""
     total = 0
     for o in iter_jsonl(path):
         total += 1
@@ -256,6 +295,12 @@ def claude_extract(path, cfg, provider, show_digest):
             branch = o.get("gitBranch")
         if not cwd and o.get("cwd"):
             cwd = o.get("cwd")
+        if o.get("type") == "custom-title":
+            custom_title = o.get("customTitle") or custom_title
+            continue
+        if o.get("type") == "ai-title":
+            ai_title = o.get("aiTitle") or ai_title
+            continue
         if o.get("isCompactSummary"):
             t = _cl_text(o.get("message", {}))
             if t.strip():
@@ -294,7 +339,10 @@ def claude_extract(path, cfg, provider, show_digest):
                 if len(ring) > turns:
                     ring.pop(0)
 
-    name = renames.get(sid)
+    name = custom_title or renames.get(sid) or ai_title
+    if not first_user:
+        first_user = ""
+    first_user = _clean_first(first_user)
     extra = (f"总条目    : {total} · 全局记忆 {len(compacts)} 段 · 阶段小结 {len(aways)} 条 · "
              f"用户消息 {len(users_all)} 条")
     print_meta_head(sid, name, first_user, branch, cwd, extra)
@@ -327,9 +375,48 @@ def claude_extract(path, cfg, provider, show_digest):
 CODEX_FILE_RE = re.compile(r"\*\*\*\s+(?:Add|Update|Delete) File:\s+(.+)")
 
 
+CODEX_INDEX = os.path.join(CODEX_DIR, "session_index.jsonl")
+
+
 def codex_sid(path):
     m = re.search(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", os.path.basename(path))
     return m.group(1) if m else os.path.basename(path).replace(".jsonl", "")
+
+
+CODEX_STATE_DB = os.path.join(CODEX_DIR, "state_5.sqlite")
+
+
+def codex_thread_meta():
+    """Codex 对话名/分支的权威源:state_5.sqlite 的 threads 表(id->title/git_branch);
+    session_index.jsonl 作兜底。返回 {id: {title, branch, first}}。"""
+    meta = {}
+    if os.path.exists(CODEX_STATE_DB):
+        try:
+            import sqlite3
+            con = sqlite3.connect(f"file:{CODEX_STATE_DB}?mode=ro", uri=True)
+            cols = [r[1] for r in con.execute("pragma table_info(threads)")]
+            sel = ["id", "title"]
+            if "git_branch" in cols:
+                sel.append("git_branch")
+            if "first_user_message" in cols:
+                sel.append("first_user_message")
+            for row in con.execute(f"select {', '.join(sel)} from threads"):
+                d = dict(zip(sel, row))
+                if d.get("id"):
+                    meta[d["id"]] = {"title": d.get("title") or "",
+                                     "branch": d.get("git_branch") or "",
+                                     "first": d.get("first_user_message") or ""}
+            con.close()
+        except Exception:
+            pass
+    if os.path.exists(CODEX_INDEX):
+        for o in iter_jsonl(CODEX_INDEX):
+            i, nm = o.get("id"), o.get("thread_name")
+            if i and nm:
+                m = meta.setdefault(i, {"title": "", "branch": "", "first": ""})
+                if not m["title"]:
+                    m["title"] = nm
+    return meta
 
 
 def codex_active_files():
@@ -358,6 +445,7 @@ def codex_head(path, max_lines=400):
 
 def codex_list_rows(project, show_all, include_archived):
     proj = os.path.abspath(project)
+    meta = codex_thread_meta()
     files = codex_active_files()
     arch = []
     if include_archived:
@@ -368,9 +456,14 @@ def codex_list_rows(project, show_all, include_archived):
         if not show_all and (not cwd or os.path.abspath(cwd) != proj):
             continue
         st = os.stat(path)
+        info = meta.get(sid, {})
+        nm = info.get("title", "")
+        name = nm or (fu[:48] if fu else "(无标题)")
+        # ✎ 只标"真起过名/AI 命名"的(标题不等于首条消息原样)
+        renamed = bool(nm) and (not fu or nm.strip()[:16] != fu.strip()[:16])
         rows.append({"sid": sid, "path": path, "mtime": st.st_mtime, "size": st.st_size,
-                     "name": fu[:48] if fu else "(无标题)", "first_user": fu[:80], "branch": "",
-                     "renamed": False, "archived": path in arch})
+                     "name": name, "first_user": fu[:80], "branch": info.get("branch", ""),
+                     "renamed": renamed, "archived": path in arch})
     return rows
 
 
@@ -425,8 +518,9 @@ def codex_extract(path, cfg, provider, show_digest):
     if not sid:
         sid = codex_sid(path)
 
+    info = codex_thread_meta().get(sid, {})
     extra = f"总条目    : {total} · 用户消息 {len(users_all)} 条 · CLI {cli or '?'}"
-    print_meta_head(sid, None, first_user, "", cwd, extra)
+    print_meta_head(sid, info.get("title"), first_user, info.get("branch", ""), cwd, extra)
     dp = maybe_print_digest(provider, sid, show_digest)
     print("## 🧠 全局记忆:Codex 无自动压缩摘要,靠「用户意图主线 + 结尾轮」还原\n")
     print_files(edited, cwd, files_cap)
