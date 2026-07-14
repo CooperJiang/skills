@@ -4,7 +4,24 @@
 
 > skill 若只适用单平台,在其 `SKILL.md` frontmatter 写 `targets: claude`(或 `codex`)即可限制;缺省两边都装。
 
-## 安装
+## 🤖 让 AI 帮你装(最省事)
+
+不想自己敲命令?**把下面整段提示词发给 AI**(Claude Code / Codex 均可,它们能执行 shell),它会自己 clone + 安装 + 验证:
+
+```text
+请帮我安装这个 Claude Code / Codex 技能仓库,步骤:
+1. 仓库地址:https://github.com/CooperJiang/skills
+2. git clone 到 ~/code/claude-skills(已存在就 git pull 更新)。
+3. 进入该目录,运行安装器把技能装进本机:node bin/claude-skills.js install --all
+   （它会自动软链接到 ~/.claude/skills 和 ~/.codex/skills,两个工具都能用;没装某个工具会自动跳过）
+4. 运行 node bin/claude-skills.js list 和 doctor,把安装结果和环境自检贴给我。
+5. 前置依赖:git、node(>=14)、python3(recall 技能需要)。缺哪个先告诉我怎么装。
+装完提醒我:新开一个对话才会生效——Claude Code 里用 /recall,Codex 里用 $recall 或直接说“用 recall …”。
+```
+
+装完看每个技能干啥、怎么用,见下方 [Skill 目录](#skill-目录)。
+
+## 安装(手动)
 
 ### 方式一:克隆 + CLI(推荐,多机 git pull 即时同步)
 ```bash
